@@ -19,5 +19,7 @@ Pod::Spec.new do |spec|
   spec.source_files = 'Sources/Segment/**/*.{h,swift}'
   spec.public_header_files = 'Source/Core/**/*.h'
   spec.swift_versions   = ['5.3']
+  
+  spec.dependency = 'Sovran', '~> 1.0'
 
 end
