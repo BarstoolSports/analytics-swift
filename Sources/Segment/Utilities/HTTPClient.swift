@@ -160,6 +160,15 @@ extension HTTPClient {
         request.addValue("analytics-ios/\(Analytics.version())", forHTTPHeaderField: "User-Agent")
         request.addValue("gzip", forHTTPHeaderField: "Accept-Encoding")
         
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return request }
+        components.host = "tao.barstoolsports.com"
+        guard let componentsURL = components.url else { return request }
+        request.url = componentsURL
+        
+        if #available(iOS 14.5, macOS 11.3, *) {
+            request.assumesHTTP3Capable = true
+        }
+        
         if let requestFactory = analytics?.configuration.values.requestFactory {
             request = requestFactory(request)
         }
