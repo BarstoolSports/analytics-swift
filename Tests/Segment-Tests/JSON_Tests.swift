@@ -38,7 +38,7 @@ class JSONTests: XCTestCase {
 
     func testJSONBasic() throws {
         let traits = try? JSON(["email": "blah@blah.com"])
-        let userInfo = UserInfo(anonymousId: "1234", userId: "brandon", traits: traits)
+        let userInfo = UserInfo(anonymousId: "1234", userId: "brandon", traits: traits, referrer: nil)
         
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
@@ -53,7 +53,7 @@ class JSONTests: XCTestCase {
     }
     
     func testJSONNil() throws {
-        let traits = try JSON(["type": NSNull(), "preferences": ["bwack"]])
+        let traits = try JSON(["type": NSNull(), "preferences": ["bwack"], "key": nil])
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
         

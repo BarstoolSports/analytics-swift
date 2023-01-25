@@ -18,12 +18,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Analytics.main.add(plugin: IDFACollection())
         Analytics.main.add(plugin: UIKitScreenTracking())
         Analytics.main.add(plugin: NotificationTracking())
+        
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        Analytics.main.add(plugin: CellularCarrier())
+#endif
 
         Analytics.support.add(plugin: ConsoleLogger(name: "support"))
         Analytics.support.add(plugin: ConsentTracking())
         
         Analytics.support.track(name: "test event")
         
+        Analytics.main.screen(title: "home screen shown", category: nil, properties: nil)
 
         return true
     }

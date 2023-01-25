@@ -36,7 +36,7 @@
 
 import Foundation
 import Segment
-import FlurryAnalytics
+import Flurry
 
 /**
  An implementation of the Flurry Analytics device mode destination as a plugin.
@@ -46,7 +46,7 @@ class FlurryDestination: DestinationPlugin {
     let timeline = Timeline()
     let type = PluginType.destination
     let key = "Flurry"
-    var analytics: Analytics? = nil
+    weak var analytics: Analytics? = nil
     
     var screenTracksEvents = false
     

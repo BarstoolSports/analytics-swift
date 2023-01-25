@@ -10,8 +10,9 @@ import Foundation
 public struct Settings: Codable {
     public var integrations: JSON? = nil
     public var plan: JSON? = nil
-    public var edgeFunctions: JSON? = nil
-    
+    public var edgeFunction: JSON? = nil
+    public var middlewareSettings: JSON? = nil
+
     public init(writeKey: String, apiHost: String) {
         integrations = try! JSON([
             SegmentDestination.Constants.integrationName.rawValue: [
@@ -34,13 +35,15 @@ public struct Settings: Codable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         self.integrations = try? values.decode(JSON.self, forKey: CodingKeys.integrations)
         self.plan = try? values.decode(JSON.self, forKey: CodingKeys.plan)
-        self.edgeFunctions = try? values.decode(JSON.self, forKey: CodingKeys.edgeFunctions)
+        self.edgeFunction = try? values.decode(JSON.self, forKey: CodingKeys.edgeFunction)
+        self.middlewareSettings = try? values.decode(JSON.self, forKey: CodingKeys.middlewareSettings)
     }
     
     enum CodingKeys: String, CodingKey {
         case integrations
         case plan
-        case edgeFunctions
+        case edgeFunction
+        case middlewareSettings
     }
     
     /**
@@ -121,7 +124,7 @@ extension Analytics {
         #endif
         
         let writeKey = self.configuration.values.writeKey
-        let httpClient = HTTPClient(analytics: self, cdnHost: configuration.values.cdnHost)
+        let httpClient = HTTPClient(analytics: self)
         let systemState: System? = store.currentState()
         let hasSettings = (systemState?.settings?.integrations != nil && systemState?.settings?.plan != nil)
         let updateType = (hasSettings ? UpdateType.refresh : UpdateType.initial)

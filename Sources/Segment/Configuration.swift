@@ -6,17 +6,11 @@
 //
 
 import Foundation
-
-public typealias AdvertisingIdCallback = () -> String?
-
+#if os(Linux)
+import FoundationNetworking
+#endif
 
 // MARK: - Internal Configuration
-
-// - IDFA handled by external plugin if desired.
-// - recordingScreenViews handled by plugin?
-// - trackInAppPurchases handled by plugin?
-// - trackDeepLinks ??
-// - flushAt / flushInterval to be done by segment destination plugin
 
 public class Configuration {
     internal struct Values {
@@ -30,7 +24,10 @@ public class Configuration {
         var autoAddSegmentDestination: Bool = true
         var apiHost: String = HTTPClient.getDefaultAPIHost()
         var cdnHost: String = HTTPClient.getDefaultCDNHost()
+        var requestFactory: ((URLRequest) -> URLRequest)? = nil
+        var errorHandler: ((Error) -> Void)? = nil
     }
+    
     internal var values: Values
 
     public init(writeKey: String) {
@@ -95,5 +92,22 @@ public extension Configuration {
         values.cdnHost = value
         return self
     }
+    
+    @discardableResult
+    func requestFactory(_ value: @escaping (URLRequest) -> URLRequest) -> Configuration {
+        values.requestFactory = value
+        return self
+    }
+    
+    @discardableResult
+    func errorHandler(_ value: @escaping (Error) -> Void) -> Configuration {
+        values.errorHandler = value
+        return self
+    }
 }
 
+extension Analytics {
+    func configuration<T>(valueFor: () -> T) -> T {
+        return valueFor()
+    }
+}

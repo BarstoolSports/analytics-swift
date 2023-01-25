@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Sovran
 
 #if os(Linux)
 // Whoever is doing swift/linux development over there
@@ -15,7 +16,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-public class SegmentDestination: DestinationPlugin {
+public class SegmentDestination: DestinationPlugin, Subscriber {
     internal enum Constants: String {
         case integrationName = "Segment.io"
         case apiHost = "apiHost"
@@ -25,7 +26,7 @@ public class SegmentDestination: DestinationPlugin {
     public let type = PluginType.destination
     public let key: String = Constants.integrationName.rawValue
     public let timeline = Timeline()
-    public var analytics: Analytics? {
+    public weak var analytics: Analytics? {
         didSet {
             initialSetup()
         }
@@ -39,34 +40,61 @@ public class SegmentDestination: DestinationPlugin {
         var cleanup: CleanupClosure? = nil
     }
     
-    private var httpClient: HTTPClient?
+    internal var httpClient: HTTPClient?
     private var uploads = [UploadTaskInfo]()
     private let uploadsQueue = DispatchQueue(label: "uploadsQueue.segment.com")
     private var storage: Storage?
     
-    private var apiKey: String? = nil
-    private var apiHost: String? = nil
-    
-    @Atomic private var eventCount: Int = 0
+    @Atomic internal var eventCount: Int = 0
+    internal var flushAt: Int = 0
     internal var flushTimer: QueueTimer? = nil
     
     internal func initialSetup() {
         guard let analytics = self.analytics else { return }
         storage = analytics.storage
         httpClient = HTTPClient(analytics: analytics)
-        flushTimer = QueueTimer(interval: analytics.configuration.values.flushInterval) {
-            self.flush()
+        
+        // flushInterval and flushAt can be modified post initialization
+        analytics.store.subscribe(self, initialState: true) { [weak self] (state: System) in
+            guard let self = self else { return }
+            self.flushTimer = QueueTimer(interval: state.configuration.values.flushInterval) { [weak self] in
+                self?.flush()
+            }
+            self.flushAt = state.configuration.values.flushAt
         }
+        
         // Add DestinationMetadata enrichment plugin
         add(plugin: DestinationMetadataPlugin())
     }
     
     public func update(settings: Settings, type: UpdateType) {
+        guard let analytics = analytics else { return }
         let segmentInfo = settings.integrationSettings(forKey: self.key)
-        apiKey = segmentInfo?[Self.Constants.apiKey.rawValue] as? String
-        apiHost = segmentInfo?[Self.Constants.apiHost.rawValue] as? String
-        if (apiHost != nil && apiKey != nil), let analytics = self.analytics {
-            httpClient = HTTPClient(analytics: analytics, apiKey: apiKey, apiHost: apiHost)
+        // if customer cycles out a writekey at app.segment.com, this is necessary.
+        /*
+         This actually works differently than anticipated.  It was thought that when a writeKey was
+         revoked, it's old writekey would redirect to the new, but it doesn't work this way.  As a result
+         it doesn't appear writekey can be changed remotely.  Leaving this here in case that changes in the
+         near future (written on 10/29/2022).
+         */
+        /*
+        if let key = segmentInfo?[Self.Constants.apiKey.rawValue] as? String, key.isEmpty == false {
+            if key != analytics.configuration.values.writeKey {
+                /*
+                 - would need to flush.
+                 - would need to change the writeKey across the system.
+                 - would need to re-init storage.
+                 - probably other things too ...
+                 */
+            }
+        }
+         */
+        // if customer specifies a different apiHost (ie: eu1.segmentapis.com) at app.segment.com ...
+        if let host = segmentInfo?[Self.Constants.apiHost.rawValue] as? String, host.isEmpty == false {
+            if host != analytics.configuration.values.writeKey {
+                analytics.configuration.values.apiHost = host
+                httpClient = HTTPClient(analytics: analytics)
+            }
         }
     }
     
@@ -93,13 +121,11 @@ public class SegmentDestination: DestinationPlugin {
     // MARK: - Event Parsing Methods
     private func queueEvent<T: RawEvent>(event: T) {
         guard let storage = self.storage else { return }
-        guard let analytics = self.analytics else { return }
         
         // Send Event to File System
         storage.write(.events, value: event)
         eventCount += 1
-        if eventCount >= analytics.configuration.values.flushAt {
-            eventCount = 0
+        if eventCount >= flushAt {
             flush()
         }
     }
@@ -112,6 +138,7 @@ public class SegmentDestination: DestinationPlugin {
         // Read events from file system
         guard let data = storage.read(Storage.Constants.events) else { return }
         
+        eventCount = 0
         cleanupUploads()
         
         analytics.log(message: "Uploads in-progress: \(pendingUploads)")
@@ -124,6 +151,7 @@ public class SegmentDestination: DestinationPlugin {
                     switch result {
                         case .success(_):
                             storage.remove(file: url)
+                            self.cleanupUploads()
                         default:
                             analytics.logFlush()
                     }

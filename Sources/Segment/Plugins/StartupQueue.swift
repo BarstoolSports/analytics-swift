@@ -8,16 +8,18 @@
 import Foundation
 import Sovran
 
-internal class StartupQueue: Plugin, Subscriber {
+public class StartupQueue: Plugin, Subscriber {
     static let maxSize = 1000
 
-    @Atomic var running: Bool = false
+    @Atomic public var running: Bool = false
     
-    let type: PluginType = .before
+    public let type: PluginType = .before
     
-    var analytics: Analytics? = nil {
+    public weak var analytics: Analytics? = nil {
         didSet {
-            analytics?.store.subscribe(self, handler: runningUpdate)
+            analytics?.store.subscribe(self) { [weak self] (state: System) in
+                self?.runningUpdate(state: state)
+            }
         }
     }
     
@@ -26,7 +28,7 @@ internal class StartupQueue: Plugin, Subscriber {
     
     required init() { }
     
-    func execute<T: RawEvent>(event: T?) -> T? {
+    public func execute<T: RawEvent>(event: T?) -> T? {
         if running == false, let e = event  {
             // timeline hasn't started, so queue it up.
             syncQueue.sync {

@@ -76,6 +76,10 @@ final class Analytics_Tests: XCTestCase {
         
         analytics.track(name: "testDestinationEnabled")
         
+        let dest = analytics.find(key: myDestination.key)
+        XCTAssertNotNil(dest)
+        XCTAssertTrue(dest is MyDestination)
+        
         wait(for: [expectation], timeout: 1.0)
     }
     
@@ -121,6 +125,9 @@ final class Analytics_Tests: XCTestCase {
 
         waitUntilStarted(analytics: analytics)
         
+        // add a referrer
+        analytics.openURL(URL(string: "https://google.com")!)
+        
         analytics.track(name: "token check")
         
         let trackEvent: TrackEvent? = outputReader.lastEvent as? TrackEvent
@@ -134,6 +141,9 @@ final class Analytics_Tests: XCTestCase {
         XCTAssertNotNil(context?["timezone"], "timezone missing!")
         XCTAssertNotNil(context?["library"], "library missing!")
         XCTAssertNotNil(context?["device"], "device missing!")
+        
+        let referrer = context?["referrer"] as! [String: Any]
+        XCTAssertEqual(referrer["url"] as! String, "https://google.com")
 
         // this key not present on watchOS (doesn't have webkit)
         #if !os(watchOS)
@@ -308,9 +318,11 @@ final class Analytics_Tests: XCTestCase {
 
     func testFlush() {
         // Use a specific writekey to this test so we do not collide with other cached items.
-        let analytics = Analytics(configuration: Configuration(writeKey: "testFlush_do_not_reuse_this_writekey"))
+        let analytics = Analytics(configuration: Configuration(writeKey: "testFlush_do_not_reuse_this_writekey").flushInterval(9999).flushAt(9999))
         
         waitUntilStarted(analytics: analytics)
+        
+        analytics.storage.hardReset(doYouKnowHowToUseThis: true)
         
         analytics.identify(userId: "brandon", traits: MyTraits(email: "blah@blah.com"))
     
@@ -319,9 +331,103 @@ final class Analytics_Tests: XCTestCase {
         analytics.flush()
         analytics.track(name: "test")
         
-        let newBatchCount = analytics.storage.eventFiles(includeUnfinished: true).count
+        let batches = analytics.storage.eventFiles(includeUnfinished: true)
+        let newBatchCount = batches.count
         // 1 new temp file
         XCTAssertTrue(newBatchCount == currentBatchCount + 1, "New Count (\(newBatchCount)) should be \(currentBatchCount) + 1")
+    }
+    
+    func testEnabled() {
+        let analytics = Analytics(configuration: Configuration(writeKey: "test"))
+        let outputReader = OutputReaderPlugin()
+        analytics.add(plugin: outputReader)
+
+        waitUntilStarted(analytics: analytics)
+        
+        analytics.track(name: "enabled")
+        
+        let trackEvent: TrackEvent? = outputReader.lastEvent as? TrackEvent
+        XCTAssertTrue(trackEvent!.event == "enabled")
+
+        outputReader.lastEvent = nil
+        analytics.enabled = false
+        analytics.track(name: "notEnabled")
+        
+        let noEvent = outputReader.lastEvent
+        XCTAssertNil(noEvent)
+        
+        analytics.enabled = true
+        analytics.track(name: "enabled")
+
+        let newEvent: TrackEvent? = outputReader.lastEvent as? TrackEvent
+        XCTAssertTrue(newEvent!.event == "enabled")
+    }
+    
+    func testSetFlushIntervalAfter() {
+        let analytics = Analytics(configuration: Configuration(writeKey: "1234"))
+        
+        waitUntilStarted(analytics: analytics)
+
+        let segment = analytics.find(pluginType: SegmentDestination.self)!
+        XCTAssertTrue(segment.flushTimer!.interval == 30)
+        
+        analytics.flushInterval = 60
+        
+        RunLoop.main.run(until: Date.distantPast)
+        
+        XCTAssertTrue(segment.flushTimer!.interval == 60)
+    }
+    
+    func testSetFlushAtAfter() {
+        let analytics = Analytics(configuration: Configuration(writeKey: "1234"))
+        
+        waitUntilStarted(analytics: analytics)
+
+        let segment = analytics.find(pluginType: SegmentDestination.self)!
+        XCTAssertTrue(segment.flushAt == 20)
+        
+        analytics.flushAt = 60
+        
+        RunLoop.main.run(until: Date.distantPast)
+        
+        XCTAssertTrue(segment.flushAt == 60)
+    }
+    
+    func testPurgeStorage() {
+        // Use a specific writekey to this test so we do not collide with other cached items.
+        let analytics = Analytics(configuration: Configuration(writeKey: "testFlush_do_not_reuse_this_writekey_either").flushInterval(9999).flushAt(9999))
+        
+        waitUntilStarted(analytics: analytics)
+        
+        analytics.storage.hardReset(doYouKnowHowToUseThis: true)
+        
+        analytics.identify(userId: "brandon", traits: MyTraits(email: "blah@blah.com"))
+    
+        let currentPendingCount = analytics.pendingUploads!.count
+        
+        XCTAssertEqual(currentPendingCount, 1)
+    
+        analytics.flush()
+        analytics.track(name: "test")
+        
+        analytics.flush()
+        analytics.track(name: "test")
+        
+        analytics.flush()
+        analytics.track(name: "test")
+        
+        var newPendingCount = analytics.pendingUploads!.count
+        XCTAssertEqual(newPendingCount, 4)
+        
+        let pending = analytics.pendingUploads!
+        analytics.purgeStorage(fileURL: pending.first!)
+
+        newPendingCount = analytics.pendingUploads!.count
+        XCTAssertEqual(newPendingCount, 3)
+        
+        analytics.purgeStorage()
+        newPendingCount = analytics.pendingUploads!.count
+        XCTAssertEqual(newPendingCount, 0)
     }
     
     func testVersion() {
@@ -354,6 +460,7 @@ final class Analytics_Tests: XCTestCase {
         }
     }
 
+    // Test to ensure bundled and unbundled integrations are populated correctly
     func testDestinationMetadata() {
         let analytics = Analytics(configuration: Configuration(writeKey: "test"))
         let mixpanel = AnyDestination(key: "Mixpanel")
@@ -389,6 +496,74 @@ final class Analytics_Tests: XCTestCase {
         let metadata = trackEvent?._metadata
         
         XCTAssertEqual(metadata?.bundled, ["Mixpanel"])
-        XCTAssertEqual(metadata?.unbundled, ["Customer.io", "Amplitude"])
+        XCTAssertEqual(metadata?.unbundled.sorted(), ["Amplitude", "Customer.io"])
+    }
+    
+    // Test to ensure bundled and active integrations are populated correctly
+    func testDestinationMetadataUnbundled() {
+        let analytics = Analytics(configuration: Configuration(writeKey: "test"))
+        let mixpanel = AnyDestination(key: "Mixpanel")
+        let outputReader = OutputReaderPlugin()
+        
+        // we want the output reader on the segment plugin
+        // cuz that's the only place the metadata is getting added.
+        let segmentDest = analytics.find(pluginType: SegmentDestination.self)
+        segmentDest?.add(plugin: outputReader)
+
+        analytics.add(plugin: mixpanel)
+        var settings = Settings(writeKey: "123")
+        let integrations = try? JSON([
+            "Segment.io": JSON([
+                "unbundledIntegrations":
+                    [
+                        "Customer.io"
+                    ]
+                ]),
+            "Mixpanel": JSON(["someKey": "someVal"]),
+            "Amplitude": JSON(["someKey": "somVal"]),
+            "dest1": JSON(["someKey": "someVal"])
+        ])
+        settings.integrations = integrations
+        analytics.store.dispatch(action: System.UpdateSettingsAction(settings: settings))
+        
+        waitUntilStarted(analytics: analytics)
+
+        
+        analytics.track(name: "sampleEvent")
+        
+        let trackEvent: TrackEvent? = outputReader.lastEvent as? TrackEvent
+        let metadata = trackEvent?._metadata
+        
+        XCTAssertEqual(metadata?.bundled, ["Mixpanel"])
+        XCTAssertEqual(metadata?.unbundled.sorted(), ["Amplitude", "Customer.io", "dest1"])
+    }
+    
+    func testRequestFactory() {
+        let config = Configuration(writeKey: "testSequential").requestFactory { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Encoding"), "gzip")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json; charset=utf-8")
+            XCTAssertTrue(request.value(forHTTPHeaderField: "User-Agent")!.contains("analytics-ios/"))
+            return request
+        }.errorHandler { error in
+            switch error {
+            case AnalyticsError.networkServerRejected(_):
+                // we expect this one; it's a bogus writekey
+                break;
+            default:
+                XCTFail("\(error)")
+            }
+        }
+        let analytics = Analytics(configuration: config)
+        analytics.storage.hardReset(doYouKnowHowToUseThis: true)
+        let outputReader = OutputReaderPlugin()
+        analytics.add(plugin: outputReader)
+        
+        waitUntilStarted(analytics: analytics)
+        
+        analytics.track(name: "something")
+        
+        analytics.flush()
+        
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 5))
     }
 }
