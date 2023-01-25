@@ -8,7 +8,7 @@
 
 Pod::Spec.new do |spec|
   spec.name         = "Segment"
-  spec.version      = "1.2.2"
+  spec.version      = "1.3.4"
   spec.summary      = "Support for cocoapods for Segment's Swift framework."
   spec.homepage     = "https://segment.com/docs/connections/sources/catalog/libraries/mobile/swift-ios/"
   spec.license      = "MIT"
